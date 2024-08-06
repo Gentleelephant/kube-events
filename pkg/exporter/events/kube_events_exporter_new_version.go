@@ -1,4 +1,4 @@
-package exporter
+package events
 
 import (
 	"context"
@@ -7,10 +7,11 @@ import (
 	"github.com/kubesphere/kube-events/pkg/util"
 	"sync"
 
+	"github.com/kubesphere/kube-events/pkg/exporter/events/types"
+
 	"github.com/kubesphere/kube-events/pkg/config"
-	"github.com/kubesphere/kube-events/pkg/exporter/sinks"
-	"github.com/kubesphere/kube-events/pkg/exporter/types"
-	corev1 "k8s.io/api/core/v1"
+	"github.com/kubesphere/kube-events/pkg/exporter/events/sinks"
+	eventsv1 "k8s.io/api/events/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/client-go/kubernetes"
@@ -30,7 +31,7 @@ const (
 
 var maxBatchSize = 500
 
-type K8sEventSource struct {
+type K8sNewEventSource struct {
 	client    *kubernetes.Clientset
 	workqueue workqueue.RateLimitingInterface
 	inf       cache.SharedIndexInformer
@@ -40,7 +41,7 @@ type K8sEventSource struct {
 	cluster string
 }
 
-func (s *K8sEventSource) ReloadConfig(c *config.ExporterConfig) {
+func (s *K8sNewEventSource) ReloadConfig(c *config.ExporterConfig) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -65,7 +66,7 @@ func (s *K8sEventSource) ReloadConfig(c *config.ExporterConfig) {
 	s.sinkers = sinkers
 }
 
-func (s *K8sEventSource) getClusterName() string {
+func (s *K8sNewEventSource) getClusterName() string {
 	ns, err := s.client.CoreV1().Namespaces().Get(context.Background(), "kubesphere-system", metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("get namespace kubesphere-system error: %s", err)
@@ -79,13 +80,13 @@ func (s *K8sEventSource) getClusterName() string {
 	return ""
 }
 
-func (s *K8sEventSource) getSinkers() []types.Sinker {
+func (s *K8sNewEventSource) getSinkers() []types.Sinker {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	return s.sinkers[:]
 }
 
-func (s *K8sEventSource) Run(ctx context.Context) error {
+func (s *K8sNewEventSource) Run(ctx context.Context) error {
 	defer s.workqueue.ShutDown()
 	go s.sinkEvents(ctx)
 	go s.inf.Run(ctx.Done())
@@ -97,7 +98,7 @@ func (s *K8sEventSource) Run(ctx context.Context) error {
 	return ctx.Err()
 }
 
-func (s *K8sEventSource) waitForCacheSync(stopc <-chan struct{}) error {
+func (s *K8sNewEventSource) waitForCacheSync(stopc <-chan struct{}) error {
 	if !cache.WaitForCacheSync(stopc, s.inf.HasSynced) {
 		return errors.New("failed to sync events cache")
 	}
@@ -105,7 +106,7 @@ func (s *K8sEventSource) waitForCacheSync(stopc <-chan struct{}) error {
 	return nil
 }
 
-func (s *K8sEventSource) drainEvents() (evts []*corev1.Event, shutdown bool) {
+func (s *K8sNewEventSource) drainEvents() (evts []*eventsv1.Event, shutdown bool) {
 	var (
 		i = 0
 		m = s.workqueue.Len()
@@ -117,7 +118,7 @@ func (s *K8sEventSource) drainEvents() (evts []*corev1.Event, shutdown bool) {
 		var obj interface{}
 		obj, shutdown = s.workqueue.Get()
 		if obj != nil {
-			evts = append(evts, obj.(*corev1.Event))
+			evts = append(evts, obj.(*eventsv1.Event))
 		}
 		i++
 		if i >= m {
@@ -127,7 +128,7 @@ func (s *K8sEventSource) drainEvents() (evts []*corev1.Event, shutdown bool) {
 	return
 }
 
-func (s *K8sEventSource) sinkEvents(ctx context.Context) {
+func (s *K8sNewEventSource) sinkEvents(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -182,25 +183,25 @@ func (s *K8sEventSource) sinkEvents(ctx context.Context) {
 	}
 }
 
-func (s *K8sEventSource) enqueueEvent(obj interface{}) {
+func (s *K8sNewEventSource) enqueueEvent(obj interface{}) {
 	if obj == nil {
 		return
 	}
-	evt, ok := obj.(*corev1.Event)
+	evt, ok := obj.(*eventsv1.Event)
 	if ok {
 		evt.SetManagedFields(nil) // set it nil because it is quite verbose
 		s.workqueue.Add(evt)
 	}
 }
 
-func NewKubeEventSource(client *kubernetes.Clientset) *K8sEventSource {
-	s := &K8sEventSource{
+func NewKubeEventSource(client *kubernetes.Clientset) *K8sNewEventSource {
+	s := &K8sNewEventSource{
 		client:    client,
 		workqueue: workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "events"),
 	}
-	lw := cache.NewListWatchFromClient(client.CoreV1().RESTClient(),
+	lw := cache.NewListWatchFromClient(client.EventsV1().RESTClient(),
 		"events", metav1.NamespaceAll, fields.Everything())
-	s.inf = cache.NewSharedIndexInformer(lw, &corev1.Event{}, 0, cache.Indexers{})
+	s.inf = cache.NewSharedIndexInformer(lw, &eventsv1.Event{}, 0, cache.Indexers{})
 	s.inf.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: s.enqueueEvent,
 		UpdateFunc: func(old, new interface{}) {
