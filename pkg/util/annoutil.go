@@ -10,6 +10,7 @@ import (
 )
 
 var cluster string
+var NewEventType bool
 
 func SetClusterName(client *kubernetes.Clientset) {
 	setCluster(client)

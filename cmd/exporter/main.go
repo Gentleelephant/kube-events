@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/kubesphere/kube-events/pkg/exporter/events"
-
 	"github.com/julienschmidt/httprouter"
 	"github.com/kubesphere/kube-events/pkg/config"
 	"github.com/kubesphere/kube-events/pkg/exporter"
@@ -19,17 +17,16 @@ import (
 )
 
 var (
-	masterURL    string
-	kubeconfig   string
-	configFile   string
-	newEventType bool
+	masterURL  string
+	kubeconfig string
+	configFile string
 )
 
 func init() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to a kubeconfig. Only required if out-of-cluster.")
 	flag.StringVar(&masterURL, "master", "", "The address of the Kubernetes API server. Overrides any value in kubeconfig. Only required if out-of-cluster.")
 	flag.StringVar(&configFile, "config.file", "", "Event exporter configuration file path")
-	flag.BoolVar(&newEventType, "newEventType", false, "if true, exporter will use new event type")
+	flag.BoolVar(&util.NewEventType, "newEventType", false, "if true, exporter will use new event type")
 }
 
 func main() {
@@ -51,12 +48,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	wg, ctx := errgroup.WithContext(ctx)
 
-	var kes exporter.EventSource
-	if newEventType {
-		kes = events.NewKubeEventSource(kclient)
-	} else {
-		kes = exporter.NewKubeEventSource(kclient)
-	}
+	kes := exporter.NewKubeEventSource(kclient)
 	if e = reloadConfig(configFile, kes.ReloadConfig); e != nil {
 		klog.Fatal("Error loading config: ", e)
 	}
