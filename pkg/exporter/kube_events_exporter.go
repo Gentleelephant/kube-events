@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+
 	"github.com/kubesphere/kube-events/pkg/util"
 	v1 "k8s.io/api/events/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sync"
 
 	"github.com/kubesphere/kube-events/pkg/config"
 	"github.com/kubesphere/kube-events/pkg/exporter/sinks"
@@ -204,7 +205,7 @@ func NewKubeEventSource(client *kubernetes.Clientset) *K8sEventSource {
 	}
 	var eventType runtime.Object
 	var lw *cache.ListWatch
-	if util.NewEventType {
+	if util.NewEventType == util.EventVersionNew {
 		eventType = &v1.Event{}
 		lw = cache.NewListWatchFromClient(client.EventsV1().RESTClient(),
 			"events", metav1.NamespaceAll, fields.Everything())
